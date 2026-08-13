@@ -1,6 +1,6 @@
 # 项目记忆 — SFG-BiCross 合成数据集流水线
 
-> 更新日期：2026-08-12（最新：Phase 2 checkpoint fix 验证完成，待用户重启 kernel 重跑 Phase D）
+> 更新日期：2026-08-13（最新：随机日志隐式反馈改为 match_score 驱动——曝光-反应一致性纠错完成，待重跑 Phase D 验证）
 
 ---
 
@@ -380,6 +380,8 @@ p_long    = sigmoid( 0.7 × f_long(theme_sim, is_asset)          + 0.3 × logit(
 
 ### 5.8 Phase D Cell 37：best_model.pt 未找到（Phase 2 未保存 checkpoint）
 
+> ⚠️ **已过期（superseded by §5.9，2026-08-13）**：本节的解决方案（quality+popularity 驱动隐式反馈）已被证实语义有误，见 §5.9。
+
 **发现日期**：2026-08-12
 
 **错误信息**：`FileNotFoundError: .../best_model.pt` at Cell 37 (P1 vs P2 evaluation)
@@ -436,6 +438,51 @@ play_time = rng.randint(90000, 150000) if has_long else rng.randint(0, 30000)
 **Why:** 此修复让随机日志具备真实的隐式正反馈信号，使 Phase 2 去偏训练能够学习曝光偏差校正，同时像真实 KuaiRand 一样支持 ranking 指标评估。
 
 **How to apply:** 修复已完成。用户重跑 notebook 即可验证。
+
+---
+
+### 5.9 随机日志隐式反馈的曝光-反应一致性纠错（match_score 驱动）
+
+**发现日期**：2026-08-13
+
+**问题**：§5.8 的修复让随机日志 engagement 不再全为 0，但它把隐式 long_view 生成为 `sigmoid(5·quality + 3·popularity - 6.2)`——**纯物品侧，与用户无关**。这违反了 KuaiRand 两阶段去偏的核心前提："两套日志反应函数一致，只有曝光分布不同"。
+
+- 反馈日志反应 = f(match_score)（用户-物品匹配）
+- 随机日志反应 = g(quality, popularity)（纯热度）
+
+二者不一致 → 随机日志没有用户偏好信号 → 去偏阶段退化成"学全局热度榜"。实测：P2 random_test AUC 只有 0.557，低于一个两特征逻辑回归（quality+popularity）的 0.655。
+
+**根因诊断（曝光因素）**：数据集有"曝光"的外壳（标准日志偏置采样 + 随机日志均匀采样），但"曝光-反应"这对因果关系的建模断裂了——曝光方式分了两套，反应机制却没有统一。这是语义纠错，不是性能优化。
+
+**解决方案**：随机日志的隐式 long_view 改为由 `compute_raw`（与反馈日志完全相同的偏好机制）驱动，只重标定阈值 b：
+
+```python
+# run_phase_c.py 中新增 compute_raw（与 run_phase_b.py 完全一致）
+raw = compute_raw(uid, iid)
+# 同 A=8.0，b 从 3.4 微调到 3.6（随机物品匹配度更低 → 阈值略高）
+p_long = 1.0 / (1.0 + np.exp(-(8.0 * raw - 3.6)))   # rate ≈ 17.8%
+```
+
+**验证结果**（2026-08-13 重跑 Phase C + adapt 后）：
+
+| 指标 | 旧（热度驱动）| 新（match_score 驱动）|
+|------|------|------|
+| long_view rate | 18.1% | 17.8% |
+| match_score → long_view AUC | ~0.5（无此信号）| 0.689 |
+| item-only(qual+pop) → long_view AUC | 0.655 | 0.53 |
+
+关键：新标签必须用"用户×物品"匹配信号（0.689）才能预测，既不能单靠物品（0.53）也不能单靠用户——这正是 SFG-BiCross 交叉注意力该学的信号。
+
+**已完成**：
+1. `run_phase_c.py` 已改 ✅（compute_raw 复算 match_score 与反馈日志误差 ~1e-11）
+2. Phase C 已重跑 ✅（random log 120,084 行，rate 17.8%）
+3. adapt_for_sfg.py 已重跑 ✅（adapted 文件 rate 17.78%）
+
+**待用户执行**：Restart Kernel → Run All Phase D；预期 P2 random_test AUC 从 0.557 显著上升到 ~0.69 天花板，P1 vs P2 对比表才有方法论意义。
+
+**Why:** 此纠错让随机日志真正携带"无偏曝光下的用户真实偏好"，使两阶段去偏在方法论上成立；否则去偏结论无效。
+
+**How to apply:** 数据已重新生成。用户重跑 Phase D 即可验证去偏效果。
 
 ---
 

@@ -10,7 +10,10 @@
       "Bash(D:/dev/projects/datasets_collection/.venv/Scripts/python.exe *)",
       "Bash(\".venv/Scripts/python.exe\" run_phase_c.py)",
       "Bash(\".venv/Scripts/python.exe\" adapt_for_sfg.py)",
-      "Bash(.venv/Scripts/python.exe -c ' *)"
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(.venv/Scripts/python.exe run_phase_c.py)",
+      "Bash(.venv/Scripts/python.exe adapt_for_sfg.py)",
+      "Bash(python -c ' *)"
     ]
   }
 }

@@ -3,7 +3,7 @@ Phase C standalone runner — KuaiRand 7-file format generation.
 Uses long_view directly from Phase B (no longer derived from fav+like).
 """
 import pandas as pd, numpy as np
-import os, warnings
+import os, json, warnings
 warnings.filterwarnings('ignore')
 
 DATA_DIR = 'data'
@@ -28,6 +28,54 @@ for c in user_latent.columns:
     if c.startswith('theme_theme_'):
         rename_map[c] = c.replace('theme_theme_', 'theme_')
 user_latent.rename(columns=rename_map, inplace=True)
+
+# ============================================================
+# Pre-compute match_score (compute_raw) for random-log implicit feedback
+# ============================================================
+THEME_COLS = [c for c in user_latent.columns if c.startswith('theme_')]
+SKILL_COLS = [c for c in item_latent.columns if c.startswith('skill_')]
+CT_COLS = ['ct_published_asset', 'ct_published_prompt', 'ct_published_commerce']
+with open(f'{DATA_DIR}/match_weights.json') as f:
+    BEST_WEIGHTS = json.load(f)
+
+def _norm(m):
+    n = np.linalg.norm(m, axis=1, keepdims=True)
+    return m / (n + 1e-12)
+
+_item_theme_norm = _norm(item_latent[THEME_COLS].values.astype(float))
+_item_skill_norm = _norm(item_latent[SKILL_COLS].values.astype(float))
+_item_ct_arr = item_latent[CT_COLS].values.astype(float)
+_item_quality_arr = item_latent['quality_score'].values.astype(float)
+_item_price_arr = item_latent['price_tier'].values.astype(float)
+_item_fresh_arr = item_latent['freshness'].values.astype(float)
+_item_pop_arr = item_latent['popularity'].values.astype(float)
+
+_user_theme_norm = _norm(user_latent[THEME_COLS].values.astype(float))
+_user_skill_norm = _norm(user_latent[SKILL_COLS].values.astype(float))
+_user_ct_arr = user_latent[CT_COLS].values.astype(float)
+_user_qsens_arr = user_latent['quality_sensitivity'].values.astype(float)
+_user_budget_arr = user_latent['budget_level'].values.astype(float)
+
+_item_idx_map = {iid: i for i, iid in enumerate(item_latent.index)}
+_user_idx_map = {uid: i for i, uid in enumerate(user_latent.index)}
+
+# Random-log implicit long_view: same preference mechanism as feedback log (raw),
+# only the threshold b is recalibrated (random items are less matched -> higher b).
+RANDOM_LONG_A = 8.0
+RANDOM_LONG_B = 3.6
+
+def compute_raw(uid, iid):
+    ui = _user_idx_map[uid]
+    ii = _item_idx_map[iid]
+    t = float(np.dot(_item_theme_norm[ii], _user_theme_norm[ui]))
+    p = 1.0 - abs(float(_user_budget_arr[ui]) - float(_item_price_arr[ii]))
+    s = float(np.dot(_item_skill_norm[ii], _user_skill_norm[ui]))
+    q = float(_user_qsens_arr[ui]) * float(_item_quality_arr[ii])
+    ct = float(np.dot(_item_ct_arr[ii], _user_ct_arr[ui]))
+    raw = (BEST_WEIGHTS['theme'] * t + BEST_WEIGHTS['price'] * p + BEST_WEIGHTS['skill'] * s +
+           BEST_WEIGHTS['quality'] * q + BEST_WEIGHTS['ct'] * ct +
+           BEST_WEIGHTS['pop'] * _item_pop_arr[ii] - BEST_WEIGHTS['fresh'] * (1.0 - _item_fresh_arr[ii]))
+    return raw
 
 print(f'Users: {len(user_latent):,}, Items: {len(item_latent):,}, Interactions: {len(interactions):,}')
 
@@ -171,15 +219,11 @@ print('\n=== 6. log_random_test_pure.csv ===')
 all_item_ids = item_latent.index.values
 all_user_ids = user_latent.index.values
 
-# --- Pre-compute item-level implicit engagement probability ---
-# Real KuaiRand random log has ~17% pos_rate from implicit feedback (play_time → long_view).
-# We model this as: p_long = sigmoid(quality * 5 + popularity * 3 - 4.8) → ~17% with feature dependence.
-item_quality_raw = item_latent['quality_score'].values
-item_pop_raw = item_latent['popularity'].values
-ITEM_IMPLICIT_LOGIT = 5.0 * item_quality_raw + 3.0 * item_pop_raw - 6.2
-ITEM_IMPLICIT_P_LONG = 1.0 / (1.0 + np.exp(-ITEM_IMPLICIT_LOGIT))
-print(f'Item implicit p_long: mean={ITEM_IMPLICIT_P_LONG.mean():.3f}, '
-      f'range=[{ITEM_IMPLICIT_P_LONG.min():.3f}, {ITEM_IMPLICIT_P_LONG.max():.3f}]')
+# --- Random-log implicit long_view: match_score-driven (correction) ---
+# Feedback log reaction = f(raw); random log must use the SAME preference mechanism,
+# differing only in exposure (uniform random items). So p_long = sigmoid(A * raw - b).
+# b=3.6 recalibrates for random items (lower match) to hit ~17-18% pos_rate.
+print('Random-log implicit long_view: p_long = sigmoid(8.0 * raw - 3.6) (match_score-driven)')
 
 random_records = []
 test_start = train_cut + pd.Timedelta(seconds=1)
@@ -193,9 +237,9 @@ for uid in all_user_ids:
     random_times = [test_start + pd.Timedelta(seconds=int(s)) for s in random_offsets]
 
     for iid, ts in zip(random_items, random_times):
-        # Map item UUID to positional index
-        iid_idx = item_latent.index.get_loc(iid)
-        p_long = ITEM_IMPLICIT_P_LONG[iid_idx]
+        # Implicit long_view driven by user-item match (raw), not item popularity
+        raw = compute_raw(uid, iid)
+        p_long = 1.0 / (1.0 + np.exp(-(RANDOM_LONG_A * raw - RANDOM_LONG_B)))
         has_long = int(rng.random() < p_long)
         # play_time: if long_view, 90-150s; else 0-30s
         if has_long:
