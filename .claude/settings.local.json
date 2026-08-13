@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(D:/dev/projects/zhere_olap/.venv/Scripts/python.exe -c ' *)",
+      "Bash(\"D:/dev/projects/zhere_olap/.venv/Scripts/python.exe\" -m jupyter nbconvert --execute --to notebook --inplace notebooks/phase_b_temporal_cf.ipynb)",
+      "Bash(\"D:/dev/projects/zhere_olap/.venv/Scripts/python.exe\" -m jupyter nbconvert --execute --to notebook --inplace notebooks/phase_c_kuairand_format.ipynb)",
+      "Bash(\"D:/dev/projects/zhere_olap/.venv/Scripts/python.exe\" adapt_for_sfg.py)",
+      "Bash(\"D:/dev/projects/zhere_olap/.venv/Scripts/jupyter\" nbconvert *)",
+      "Bash(\"D:/dev/projects/zhere_olap/.venv/Scripts/python.exe\" run_phase_b.py)",
+      "Bash(D:/dev/projects/datasets_collection/.venv/Scripts/python.exe *)",
+      "Bash(\".venv/Scripts/python.exe\" run_phase_c.py)",
+      "Bash(\".venv/Scripts/python.exe\" adapt_for_sfg.py)",
+      "Bash(.venv/Scripts/python.exe -c ' *)"
+    ]
+  }
+}

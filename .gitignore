@@ -1,0 +1,4 @@
+*.pt
+*.pth
+*.ckpt
+outputs_sfg_bicross/

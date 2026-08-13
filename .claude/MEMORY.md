@@ -1,0 +1,3 @@
+- [Synthetic Dataset Design](.claude/memory/synthetic-dataset-design.md) — v2 完整方案：Latent Preference Model 合成数据生成
+- [SFG-BiCross Algorithm](.claude/memory/sfg-bicross-algorithm.md) — 目标推荐算法架构与数据要求
+- [Conversation Checkpoint](.claude/memory/conversation-checkpoint.md) — 对话断点与下一步行动
